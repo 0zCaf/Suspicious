@@ -1,0 +1,95 @@
+-- Made by gavinrgb27 
+
+
+
+
+
+
+
+
+local Players = game:GetService("Players")
+for _, player in ipairs(Players:GetPlayers()) do 
+local GUI = Instance.new("ScreenGui")
+GUI.Name = "pop"
+GUI.Parent = player:WaitForChild("PlayerGui")
+GUI.IgnoreGuiInset = true
+GUI.Enabled = false
+local v2 = Instance.new("ViewportFrame")
+v2.Size = UDim2.new(1, 0, 1, 0)
+v2.BackgroundTransparency = 1
+v2.ZIndex = 3
+local ffame = Instance.new("Frame",GUI)
+ffame.Size = UDim2.new(1,0,1,0)
+ffame.BackgroundColor3 = Color3.fromRGB(0,0,0)
+v2.Parent = GUI
+local v_u_3 = Instance.new("Camera")
+v_u_3.Parent = v2
+v_u_3.FieldOfView = 111
+v2.CurrentCamera = v_u_3
+local world = Instance.new("WorldModel")
+world.Parent = v2
+local v_u_4 = Instance.new("Model")
+v_u_4.Name = "boi"
+v_u_4.Parent = world
+local v_u_11 = Instance.new('Part')
+v_u_11.Name = 'Head'
+v_u_11.Parent = v_u_4
+v_u_11.Size = Vector3.new(5,5,5)
+--v_u_11.CFrame = CFrame.new(128.50428771972656,4.613368511199951,45.980003356933594,-4.371138828673793e-08,0,-1,0,1,0,1,0,-4.371138828673793e-08)
+v_u_11.Rotation = Vector3.new(-4.6,-90,0)
+v_u_11.Color = Color3.new(0.06666667014360428,0.06666667014360428,0.06666667014360428)
+v_u_11.Material = Enum.Material.Glass
+v_u_11.Reflectance = 0
+v_u_11.Transparency = 0
+v_u_11.Anchored = true
+v_u_11.CanCollide = true
+v_u_11.CanTouch = true
+v_u_11.CanQuery = true
+v_u_11.CastShadow = true
+v_u_11.Massless = false
+local v3_Decal = Instance.new('Decal')
+v3_Decal.Name = 'Decal'
+v3_Decal.Parent = v_u_11
+v3_Decal.Texture = 'rbxassetid://8485799110'
+v3_Decal.Transparency = 0
+v3_Decal.Face = Enum.NormalId.Right
+
+v_u_3.CFrame = CFrame.new(Vector3.new(0,0,2), v_u_11.Position)
+    GUI.Enabled = true
+    local v9 = Instance.new("ScreenGui")
+    v9.Parent = player:WaitForChild("PlayerGui")
+    local v10 = Instance.new("Sound")
+    v10.Parent = v9
+    v10.Volume = 3
+    v10.SoundId = "rbxassetid://1839870917"
+    v10:Play()
+
+    local v12 = game:GetService("RunService")
+    local v_u_13 = 0.05
+    
+    local v18 = v12.Heartbeat:Connect(function(dt)
+        if v_u_11 then
+            v_u_13 = v_u_13 + (0.3 - v_u_13) * 0.09 * dt
+            
+            local base = CFrame.new(v_u_11.Position + Vector3.new(0, 0.5, 4), v_u_11.Position)
+            
+            local shakeX = math.random(-v_u_13 * 100, v_u_13 * 100) / 100
+            local shakeY = math.random(-v_u_13 * 100, v_u_13 * 100) / 100
+            
+            v_u_3.CFrame = base + Vector3.new(shakeX, shakeY, 0)
+        end
+    end)
+    task.wait(10)
+    if v18 then
+        v18:Disconnect()
+    end
+    v10:Stop()
+    v10.SoundId = "rbxassetid://6270627739"
+    v10.Volume = 3
+    v10.PlaybackSpeed = 0.7
+    v10:Play()
+    task.wait(4)
+    GUI:Destroy()
+    v9:Destroy()
+    v_u_5 = false
+end
