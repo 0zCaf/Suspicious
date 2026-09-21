@@ -1,0 +1,129 @@
+---------- destroy map & functionally seat and spawnlocation (from Client)
+
+getgenv().enabled = false  -- enabled spawnlocation and seat
+getgenv().enabled0 = false -- destroy maps
+
+--- get environtment
+local p9,Players=game:GetService("Players"),game:GetService("Players")
+local l2,Lighting=game:GetService("Lighting"),game:GetService("Lighting")
+local w0=workspace
+local W0=nil
+if w0 then
+elseif not w0 then
+W0=game:GetService("Workspace")
+end
+local function x7(v1)
+local n3=v1:FindFirstAncestorOfClass("Model")
+return n3 and n3:FindFirstChildOfClass("Humanoid")
+end
+if enabled0 == true then
+for _,q8 in pairs(w0:GetDescendants()) do
+	if q8:IsA("Terrain") then
+		q8:Clear()
+	elseif q8:IsA("BasePart") then
+		if not x7(q8) then
+q8:Destroy()
+		end
+	end
+end 
+l2:ClearAllChildren()
+game.StarterPack:ClearAllChildren()
+elseif enabled0 == false then
+end
+if enabled == true then
+local skids = {}
+for _,v in ipairs(w0:GetDescendants()) do
+	if v:IsA("SpawnLocation") then
+		table.insert(skids,v)
+	end
+end
+if #skids > 0 then
+	local lastSpawn
+	local function pwnedYoulol()
+		if #skids == 1 then
+			return skids[1]
+		end
+		local pick
+		repeat
+			pick = skids[math.random(1,#skids)]
+		until pick ~= lastSpawn
+		lastSpawn = pick
+		return pick
+	end
+	local function titi(char)
+		local hrp = char:WaitForChild("HumanoidRootPart",4.4)
+		if not hrp then return end
+		local spawn = pwnedYoulol()
+		if spawn then
+			hrp.CFrame = spawn.CFrame + Vector3.new(0,2.3,0)
+		end
+	end
+	local function titi2(plr)
+		plr.CharacterAdded:Connect(titi)
+		if plr.Character then
+			task.spawn(titi,plr.Character)
+		end
+	end
+	for _,plr in ipairs(Players:GetPlayers()) do titi2(plr) end Players.PlayerAdded:Connect(titi2)
+end
+local sitting = false local cooldown = false
+local cooldownTime = 1
+local currentWeld
+local jumpConnection
+local function Unsit(currentWeld)
+if not sitting then return end
+sitting = false
+if currentWeld and currentWeld.Parent then
+	currentWeld.Enabled = false
+	currentWeld:Destroy()
+	currentWeld = nil
+end
+if jumpConnection then
+		jumpConnection:Disconnect()
+		jumpConnection = nil
+end
+humanoid.Sit = false
+cooldown = true
+task.delay(cooldownTime, function() cooldown = false end)
+end
+local function SitOnSeat(seat)
+	if sitting or cooldown then return end
+	if not seat or not seat:IsDescendantOf(workspace) then return end
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if not root then return end
+	sitting = true
+	character:MoveTo(seat.Position)
+	task.wait(0.04)
+	humanoid.Sit = true
+	humanoid.Jump = false
+	root.CFrame = seat.CFrame * CFrame.new(0, 1.56732728992, 0)
+	currentWeld = Instance.new("WeldConstraint")
+	currentWeld.Part0 = seat
+	currentWeld.Part1 = root
+	currentWeld.Parent = seat
+	jumpConnection = humanoid.Jumping:Connect(function(jumping)
+		if jumping then
+			Unsit(currentWeld)
+		end
+	end)
+end
+local function ConnectSeat(seat)
+if not (seat:IsA("Seat") or seat:IsA("VehicleSeat")) then
+return
+end
+seat.Touched:Connect(function(hit)
+if sitting or cooldown then
+return
+end
+local model = hit.Parent
+if not model then
+return
+end
+local hum = model:FindFirstChildOfClass("Humanoid")
+if hum ~= humanoid then return end
+SitOnSeat(seat)
+end)
+end
+for _, obj in ipairs(workspace:GetDescendants()) do if obj:IsA("Seat") or obj:IsA("VehicleSeat") then ConnectSeat(obj) end end
+workspace.DescendantAdded:Connect(function(obj) if obj:IsA("Seat") or obj:IsA("VehicleSeat") then ConnectSeat(obj) end end)
+else end
