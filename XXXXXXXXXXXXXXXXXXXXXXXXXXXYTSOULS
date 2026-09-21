@@ -30,6 +30,7 @@ l2:ClearAllChildren()
 game.StarterPack:ClearAllChildren()
 elseif enabled0 == false then
 end
+local plr = p9.LocalPlayer local char = plr.Character or plr.CharacterAdded:Wait() local humanoid = char:WaitForChild("Humanoid") plr.CharacterAdded:Connect(function(charr) char = charr humanoid = charr:WaitForChild("Humanoid") end)
 if enabled == true then
 local skids = {}
 for _,v in ipairs(w0:GetDescendants()) do
