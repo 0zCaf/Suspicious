@@ -1,0 +1,494 @@
+-- Reanimation Improved by 0zCaf
+local player = game:GetService("Players").LocalPlayer
+local char = player.Character or player.CharacterAdded:Wait()
+local hum = char:WaitForChild("Humanoid")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local runService = game:GetService("RunService")
+local task_0 = task
+task.spawn(function()
+    local hd = ReplicatedStorage:FindFirstChild("HDAdmin") or ReplicatedStorage:FindFirstChild("HDAdminHDClient")
+    if hd then
+        local signals = hd:FindFirstChild("Signals") or (hd:FindFirstChild("HDClient") and hd.HDClient:FindFirstChild("Signals"))
+        local req = signals and signals:FindFirstChild("RequestCommandSilent")
+        if req then
+            pcall(function()
+                req:InvokeServer(";btools me")
+                task_0.wait(0.175)
+                req:InvokeServer(";invisible me")
+            end)
+        end
+    end
+end)
+task_0.wait(0.175)
+local tool = player:FindFirstChild("SyncAPI", true) or ReplicatedStorage:FindFirstChild("SyncAPI", true)
+if not tool then return end
+local remote = tool:IsA("RemoteFunction") and tool or tool:FindFirstChild("ServerEndpoint")
+if not remote then return end
+local _G = getgenv()
+local STATE = {
+    Active = true,
+    Paused = false,
+    PartMap = {},
+    LastCF = {},
+    PendingSync = {},
+    LastSend = {},
+    Connections = {},
+    MoveConn = nil,
+    DeathConn = nil,
+    DescConn = nil,
+    NextSend = 0,
+    SendRate = 0.5 / 35,
+    BatchInterval = 0.05,
+    LastBatch = 0,
+    InvokePending = false,
+    InvokeQueue = {},
+    MaxParts = 500,
+}
+local function safeInvoke(method, ...)
+    if STATE.InvokePending then
+        table.insert(STATE.InvokeQueue, {method, ...})
+        return nil
+    end
+    STATE.InvokePending = true
+    local args = {...}
+    local ok, res = pcall(function()
+        return remote:InvokeServer(method, unpack(args))
+    end)
+    STATE.InvokePending = false
+    if not ok then
+        pcall(function()
+            return remote:InvokeServer(method, unpack(args))
+        end)
+    end
+    if #STATE.InvokeQueue > 0 then
+        local nextCall = table.remove(STATE.InvokeQueue, 1)
+        task_0.spawn(function()
+            safeInvoke(unpack(nextCall))
+        end)
+    end
+    return res
+end
+local function GetVisualData(real)
+    local meshes, textures = {}, {}
+    local function safeDiv(a, b) return (b and b ~= 0) and (a / b) or 1 end
+    local shapeToMeshType = {
+        [Enum.PartType.Block]       = Enum.MeshType.Brick,
+        [Enum.PartType.Cylinder]    = Enum.MeshType.Cylinder,
+        [Enum.PartType.Ball]        = Enum.MeshType.Sphere,
+        [Enum.PartType.Wedge]       = Enum.MeshType.Wedge,
+        [Enum.PartType.CornerWedge] = Enum.MeshType.Wedge,
+    }
+    local function processMeshPart(meshPart)
+        local meshSize = meshPart.MeshSize
+        local fixedScale = Vector3.new(
+            safeDiv(meshPart.Size.X, meshSize.X),
+            safeDiv(meshPart.Size.Y, meshSize.Y),
+            safeDiv(meshPart.Size.Z, meshSize.Z)
+        )
+        local meshType = Enum.MeshType.FileMesh
+        if meshPart.MeshId == "" or meshPart.MeshId == nil then
+            meshType = shapeToMeshType[meshPart.Shape] or Enum.MeshType.Brick
+        end
+        table.insert(meshes, {
+            Part = nil,
+            MeshType = meshType,
+            Scale = fixedScale,
+            MeshId = meshPart.MeshId,
+            TextureId = meshPart.TextureID
+        })
+    end
+    for _, item in ipairs(real:GetDescendants()) do
+        if item:IsA("SpecialMesh") then
+            table.insert(meshes, {
+                Part = nil,
+                MeshType = item.MeshType,
+                Scale = item.Scale,
+                MeshId = item.MeshId,
+                TextureId = item.TextureId
+            })
+        elseif item:IsA("MeshPart") then
+            processMeshPart(item)
+        elseif item:IsA("Decal") or item:IsA("Texture") then
+            local isTexture = item:IsA("Texture")
+            table.insert(textures, {
+                Part = nil,
+                Face = item.Face,
+                Texture = item.Texture,
+                Transparency = item.Transparency,
+                Color = item.Color3,
+                TextureType = item.ClassName,
+                OffsetStudsU = isTexture and item.OffsetStudsU or 0,
+                OffsetStudsV = isTexture and item.OffsetStudsV or 0,
+                StudsPerTileU = isTexture and item.StudsPerTileU or 1,
+                StudsPerTileV = isTexture and item.StudsPerTileV or 1
+            })
+        end
+    end
+    if real:IsA("MeshPart") then processMeshPart(real) end
+    return meshes, textures
+end
+local function queueSync(real, fake, syncType, data)
+    if not STATE.Active or STATE.Paused then return end
+    local key = tostring(real) .. "_" .. syncType
+    local now = tick()
+    if STATE.LastSend[key] and now - STATE.LastSend[key] < STATE.BatchInterval then
+        return
+    end
+    STATE.LastSend[key] = now
+    if not STATE.PendingSync[syncType] then
+        STATE.PendingSync[syncType] = {}
+    end
+    table.insert(STATE.PendingSync[syncType], data)
+end
+
+local function flushSync()
+    if not STATE.Active or STATE.Paused then return end
+    local now = tick()
+    if now - STATE.LastBatch < STATE.BatchInterval then return end
+    STATE.LastBatch = now
+    for syncType, dataList in pairs(STATE.PendingSync) do
+        if #dataList > 0 then
+            local method = "Sync" .. syncType
+            task_0.spawn(function()
+                safeInvoke(method, dataList)
+            end)
+            STATE.PendingSync[syncType] = {}
+        end
+    end
+end
+
+local function TrackChanges(real, fake)
+    local function updateColor()
+        queueSync(real, fake, "Color", {
+            Part = fake,
+            Color = real.Color,
+            Transparency = real.Transparency
+        })
+    end
+    local function updateSize()
+        queueSync(real, fake, "Resize", {
+            Part = fake,
+            Size = real.Size,
+            CFrame = real.CFrame
+        })
+    end
+    real:GetPropertyChangedSignal("Color"):Connect(updateColor)
+    real:GetPropertyChangedSignal("Transparency"):Connect(updateColor)
+    real:GetPropertyChangedSignal("Size"):Connect(updateSize)
+    for _, v in pairs(real:GetDescendants()) do
+        if v:IsA("SpecialMesh") then
+            local function syncMesh()
+                queueSync(real, fake, "Mesh", {
+                    Part = fake,
+                    MeshType = v.MeshType,
+                    Scale = v.Scale,
+                    MeshId = v.MeshId,
+                    TextureId = v.TextureId
+                })
+            end
+            v:GetPropertyChangedSignal("MeshId"):Connect(syncMesh)
+            v:GetPropertyChangedSignal("TextureId"):Connect(syncMesh)
+            v:GetPropertyChangedSignal("Scale"):Connect(syncMesh)
+        elseif v:IsA("Decal") or v:IsA("Texture") then
+            local function syncTexture()
+                queueSync(real, fake, "Texture", {
+                    Part = fake,
+                    Face = v.Face,
+                    Texture = v.Texture,
+                    Transparency = v.Transparency,
+                    Color = v:IsA("Texture") and v.Color3 or nil,
+                    TextureType = v.ClassName,
+                    OffsetStudsU = v:IsA("Texture") and v.OffsetStudsU or 0,
+                    OffsetStudsV = v:IsA("Texture") and v.OffsetStudsV or 0,
+                    StudsPerTileU = v:IsA("Texture") and v.StudsPerTileU or 1,
+                    StudsPerTileV = v:IsA("Texture") and v.StudsPerTileV or 1
+                })
+            end
+            v:GetPropertyChangedSignal("Texture"):Connect(syncTexture)
+            v:GetPropertyChangedSignal("Transparency"):Connect(syncTexture)
+            if v:IsA("Texture") then
+                v:GetPropertyChangedSignal("Color3"):Connect(syncTexture)
+                v:GetPropertyChangedSignal("OffsetStudsU"):Connect(syncTexture)
+                v:GetPropertyChangedSignal("OffsetStudsV"):Connect(syncTexture)
+                v:GetPropertyChangedSignal("StudsPerTileU"):Connect(syncTexture)
+                v:GetPropertyChangedSignal("StudsPerTileV"):Connect(syncTexture)
+            end
+        end
+    end
+end
+
+local function cleanupPart(real)
+    local fake = STATE.PartMap[real]
+    if fake and fake.Parent then
+        task_0.spawn(function()
+            safeInvoke("Remove", {fake})
+        end)
+    end
+    STATE.PartMap[real] = nil
+    STATE.LastCF[real] = nil
+end
+
+local function cleanupAll()
+    local removePacket = {}
+    for real, fake in pairs(STATE.PartMap) do
+        if fake and fake.Parent then
+            table.insert(removePacket, fake)
+        end
+    end
+    if #removePacket > 0 then
+        task_0.spawn(function()
+            safeInvoke("Remove", removePacket)
+        end)
+    end
+    table.clear(STATE.PartMap)
+    table.clear(STATE.LastCF)
+    table.clear(STATE.PendingSync)
+    table.clear(STATE.LastSend)
+end
+
+if STATE.DeathConn then
+    STATE.DeathConn:Disconnect()
+end
+STATE.DeathConn = hum.Died:Connect(function()
+    cleanupAll()
+    if STATE.MoveConn then
+        STATE.MoveConn:Disconnect()
+        STATE.MoveConn = nil
+    end
+    STATE.Active = false
+end)
+
+local function SyncBodyPart(real)
+    if not real:IsA("BasePart") then return end
+    if real.Name == "HumanoidRootPart" then return end
+    if real:FindFirstChild("WELD0") then return end
+    if STATE.PartMap[real] then return end
+    if #STATE.PartMap >= STATE.MaxParts then
+        cleanupAll()
+    end
+
+    local visible = false
+    if real.Transparency < 1 then visible = true end
+    for _, v in pairs(real:GetDescendants()) do
+        if v:IsA("Decal") or v:IsA("Texture") then
+            if v.Transparency < 1 and v.Texture ~= "" then
+                visible = true
+                break
+            end
+        elseif v:IsA("SpecialMesh") then
+            if v.TextureId ~= "" or v.MeshId ~= "" then
+                visible = true
+                break
+            end
+        end
+    end
+    if not visible then return end
+
+    local weldTag = Instance.new("BoolValue", real)
+    weldTag.Name = "WELD0"
+
+    task_0.spawn(function()
+        local partType = "Normal"
+        if real:IsA("TrussPart") then partType = "Truss"
+        elseif real:IsA("WedgePart") then partType = "Wedge"
+        elseif real:IsA("CornerWedgePart") then partType = "Corner"
+        elseif real:IsA("Seat") then partType = "Seat"
+        elseif real:IsA("VehicleSeat") then partType = "VehicleSeat"
+        elseif real:IsA("SpawnLocation") then partType = "Spawn"
+        elseif real:IsA("Part") then
+            if real.Shape == Enum.PartType.Ball then partType = "Ball"
+            elseif real.Shape == Enum.PartType.Cylinder then partType = "Cylinder"
+            end
+        end
+
+        local fake = safeInvoke("CreatePart", partType, real.CFrame, workspace)
+        if not fake then return end
+
+        STATE.PartMap[real] = fake
+        safeInvoke("SyncAnchor", {{Part = fake, Anchored = true}})
+        safeInvoke("SyncCollision", {{Part = fake, CanCollide = false}})
+        safeInvoke("SyncMaterial", {{Part = fake, Material = real.Material}})
+        safeInvoke("SyncColor", {{Part = fake, Color = real.Color, Transparency = real.Transparency}})
+        safeInvoke("SyncResize", {{Part = fake, Size = real.Size, CFrame = real.CFrame}})
+
+        local meshes, textures = GetVisualData(real)
+        if #meshes > 0 then
+            for i in pairs(meshes) do meshes[i].Part = fake end
+            safeInvoke("CreateMeshes", {{Part = fake}})
+            safeInvoke("SyncMesh", meshes)
+        end
+        if #textures > 0 then
+            local createPack = {}
+            for i in pairs(textures) do
+                textures[i].Part = fake
+                table.insert(createPack, {
+                    Part = fake,
+                    Face = textures[i].Face,
+                    TextureType = textures[i].TextureType
+                })
+            end
+            safeInvoke("CreateTextures", createPack)
+            task_0.wait(0.1)
+            safeInvoke("SyncTexture", textures)
+        end
+
+        local spot = real:FindFirstChildOfClass("SpotLight")
+        if spot then
+            safeInvoke("CreateLights", {{Part = fake, LightType = "SpotLight"}})
+            safeInvoke("SyncLighting", {{
+                Part = fake,
+                LightType = "SpotLight",
+                Color = spot.Color,
+                Range = spot.Range,
+                Face = spot.Face,
+                Angle = spot.Angle,
+                Brightness = spot.Brightness,
+                Shadows = spot.Shadows
+            }})
+        end
+        local point = real:FindFirstChildOfClass("PointLight")
+        if point then
+            safeInvoke("CreateLights", {{Part = fake, LightType = "PointLight"}})
+            safeInvoke("SyncLighting", {{
+                Part = fake,
+                LightType = "PointLight",
+                Color = point.Color,
+                Range = point.Range,
+                Brightness = point.Brightness,
+                Shadows = point.Shadows
+            }})
+        end
+        local surface = real:FindFirstChildOfClass("SurfaceLight")
+        if surface then
+            safeInvoke("CreateLights", {{Part = fake, LightType = "SurfaceLight"}})
+            safeInvoke("SyncLighting", {{
+                Part = fake,
+                LightType = "SurfaceLight",
+                Color = surface.Color,
+                Range = surface.Range,
+                Face = surface.Face,
+                Angle = surface.Angle,
+                Brightness = surface.Brightness,
+                Shadows = surface.Shadows
+            }})
+        end
+        for _, object in pairs(real:GetChildren()) do
+            if object:IsA("Fire") or object:IsA("Smoke") or object:IsA("Sparkles") then
+                local properties = {Part = fake, DecorationType = object.ClassName}
+                if object:IsA("Fire") then
+                    properties.Color = object.Color
+                    properties.SecondaryColor = object.SecondaryColor
+                    properties.Heat = object.Heat
+                    properties.Size = object.Size
+                elseif object:IsA("Smoke") then
+                    properties.Color = object.Color
+                    properties.Opacity = object.Opacity
+                    properties.RiseVelocity = object.RiseVelocity
+                    properties.Size = object.Size
+                elseif object:IsA("Sparkles") then
+                    properties.SparkleColor = object.SparkleColor
+                end
+                safeInvoke("SyncDecorate", {properties})
+            end
+        end
+        TrackChanges(real, fake)
+
+        real.LocalTransparencyModifier = 1
+        for _, v in pairs(real:GetDescendants()) do
+            if v:IsA("BasePart") or v:IsA("Decal") then
+                v.LocalTransparencyModifier = 1
+            end
+        end
+
+        for _, light in pairs(real:GetChildren()) do
+            if light:IsA("PointLight") or light:IsA("SpotLight") or light:IsA("SurfaceLight") then
+                local function syncLight()
+                    if fake.Parent then
+                        queueSync(real, fake, "Lighting", {
+                            Part = fake,
+                            LightType = light.ClassName,
+                            Color = light.Color,
+                            Range = light.Range,
+                            Brightness = light.Brightness,
+                            Shadows = light.Shadows,
+                            Face = (light:IsA("SpotLight") or light:IsA("SurfaceLight")) and light.Face or nil,
+                            Angle = (light:IsA("SpotLight") or light:IsA("SurfaceLight")) and light.Angle or nil
+                        })
+                    end
+                end
+                light:GetPropertyChangedSignal("Color"):Connect(syncLight)
+                light:GetPropertyChangedSignal("Brightness"):Connect(syncLight)
+                light:GetPropertyChangedSignal("Range"):Connect(syncLight)
+                if light:IsA("SpotLight") or light:IsA("SurfaceLight") then
+                    light:GetPropertyChangedSignal("Angle"):Connect(syncLight)
+                    light:GetPropertyChangedSignal("Face"):Connect(syncLight)
+                end
+            end
+        end
+
+        real.AncestryChanged:Connect(function(_, p)
+            if not p then
+                cleanupPart(real)
+            end
+        end)
+    end)
+end
+
+for _, v in pairs(char:GetDescendants()) do
+    SyncBodyPart(v)
+end
+
+if STATE.DescConn then
+    STATE.DescConn:Disconnect()
+end
+STATE.DescConn = char.DescendantAdded:Connect(SyncBodyPart)
+
+if STATE.MoveConn then
+    STATE.MoveConn:Disconnect()
+end
+STATE.MoveConn = runService.RenderStepped:Connect(function()
+    if not STATE.Active or STATE.Paused then return end
+    local now = tick()
+    if now < STATE.NextSend then return end
+
+    local partCount = 0
+    for _ in pairs(STATE.PartMap) do partCount = partCount + 1 end
+    local adaptiveRate = STATE.SendRate
+    if partCount > 100 then
+        adaptiveRate = STATE.SendRate * 2
+    end
+    if partCount > 250 then
+        adaptiveRate = STATE.SendRate * 3
+    end
+
+    STATE.NextSend = now + adaptiveRate
+
+    local movingParts = {}
+    local movingCount = 0
+
+    for real, fake in pairs(STATE.PartMap) do
+        if real.Parent and fake.Parent then
+            local cf = real.CFrame
+            local old = STATE.LastCF[real]
+            if not old
+                or (old.Position - cf.Position).Magnitude > 0.01
+                or (old.LookVector - cf.LookVector).Magnitude > 0.01
+            then
+                STATE.LastCF[real] = cf
+                movingCount = movingCount + 1
+                movingParts[movingCount] = {Part = fake, CFrame = cf}
+            end
+        else
+            STATE.PartMap[real] = nil
+            STATE.LastCF[real] = nil
+        end
+    end
+
+    if movingCount > 0 then
+        safeInvoke("SyncMove", movingParts)
+    end
+
+    flushSync()
+end)
+
+_G.F3X_SyncState = STATE
